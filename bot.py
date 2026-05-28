@@ -3567,6 +3567,7 @@ async def rcp(interaction: discord.Interaction, code: str):
     await interaction.response.send_message(embed=embed)
 
 from multiprocessing import Process
+import multiprocessing
 
 def start_bot():
     bot.run(Config['DiscordBotToken'])
@@ -3575,6 +3576,8 @@ def start_web_server():
     app.run(debug=False, port=1161, host="0.0.0.0")
 
 if __name__ == '__main__':
+    multiprocessing.set_start_method("spawn", force=True)
+
     flask_process = Process(target=start_web_server)
     discord_process = Process(target=start_bot)
 
