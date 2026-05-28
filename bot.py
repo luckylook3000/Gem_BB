@@ -3,71 +3,49 @@ import discord
 import random
 import asyncio
 import json
-import math
 import time
-import re
 from discord import app_commands, Interaction, Embed
 from discord.ext import commands
 from discord.ui import Button, View
-from dotenv import load_dotenv
 
 # ==========================================
-# 1. CONFIG & SECRETS
+# 1. TOKEN & SECRETS (Pulls directly from Replit Lock Icon 🔒)
 # ==========================================
-load_dotenv()
-TOKEN = os.getenv("DISCORDBOTTOKEN") # Pulls from your Replit Secret
-
-Config = {
-    "Bot Name": "Gem Bet",
-    "Bot Icon": "https://cdn.discordapp.com/icons/1314565811410829332/a_f59d3588d80ec8f0ab041a65d6c5a761.gif?size=1024",
-    "Towers": {"WinChance": 45, "Multis": [1.42, 2.02, 2.86, 4.05, 5.69]},
-    "Mines": {"House": 0.25},
-    "AdminCommands": {
-        "UserID": ["1177041430502461523", "1216488230245892186", "1278257618758139905", "1144624389556551750", "1124671288527560844", "1085730642928607272", "1310620656865378355"],
-    },
-}
+TOKEN = os.getenv("DISCORDBOTTOKEN") 
 
 # ==========================================
-# 2. DATABASE ENGINE (Uses your existing JSONs)
+# 2. AUTO-DATABASE (Creates files if missing)
 # ==========================================
-def readdata():
+DATA_FILE = "data.json"
+
+def init_db():
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "w") as f:
+            json.dump({"users": {}}, f, indent=4)
+
+def load_bal():
     try:
-        with open("data.json", "r") as f: return json.load(f)
-    except:
-        return {"users": {}}
+        with open(DATA_FILE, "r") as f: return json.load(f)
+    except: return {"users": {}}
 
-def writedata(data):
-    with open("data.json", "w") as f: json.dump(data, f, indent=4)
+def save_bal(data):
+    with open(DATA_FILE, "w") as f: json.dump(data, f, indent=4)
 
-def register_user(uid):
-    data = readdata()
-    if uid not in data['users']:
-        data["users"][uid] = {
-            "Gems": 1000, "Wagered": 0, "Net Profit": 0, "Deposited": 0, 
-            "Withdrawn": 0, "Affiliate": None, "Affiliate Earnings": 0, "linkedusername": None
-        }
-        writedata(data)
+def get_bal(u_id):
+    data = load_bal()
+    return data['users'].get(str(u_id), 1000)
 
-def get_gems(uid):
-    data = readdata()
-    return data['users'].get(uid, {}).get("Gems", 1000)
-
-def add_gems(uid, amount):
-    data = readdata()
-    if uid not in data['users']: register_user(uid)
-    data['users'][uid]['Gems'] += amount
-    writedata(data)
-    return data['users'][uid]['Gems']
-
-def subtract_gems(uid, amount):
-    data = readdata()
-    if uid in data['users']:
-        data['users'][uid]['Gems'] -= amount
-        writedata(data)
+def update_bal(u_id, amt):
+    data = load_bal()
+    u_id = str(u_id)
+    if u_id not in data['users']:
+        data['users'][u_id] = {"Gems": 1000}
+    data['users'][u_id]['Gems'] += amt
+    save_bal(data)
+    return data['users'][u_id]['Gems']
 
 def add_suffix(val):
     val = abs(val)
-    if val >= 1e15: return f"{val/1e15:.1f}Q"
     if val >= 1e12: return f"{val/1e12:.1f}T"
     if val >= 1e9: return f"{val/1e9:.1f}B"
     if val >= 1e6: return f"{val/1e6:.1f}M"
@@ -76,7 +54,7 @@ def add_suffix(val):
 
 def suffix_to_int(s):
     s = s.lower()
-    suffixes = {'k': 1e3, 'm': 1e6, 'b': 1e9, 't': 1e12, 'q': 1e15}
+    suffixes = {'k': 1e3, 'm': 1e6, 'b': 1e9, 't': 1e12}
     if s[-1] in suffixes: return int(float(s[:-1]) * suffixes[s[-1]])
     return int(s)
 
@@ -90,7 +68,7 @@ async def can_play(user_id):
     now = time.time()
     if user_id in active_games:
         return False, "You already have a game in progress! Finish it first. ⏳"
-    if user_id in game_cooldowns and (now - game_cooldowns[user_id]) < 1.0:
+    if user_id in game_cooldowns and (now - game_co cooldowns[user_id]) < 1.0:
         return False, "Slow down! 1 second cooldown between games. ⏱️"
     return True, None
 
@@ -106,109 +84,82 @@ class GemBetBot(commands.Bot):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print("✅ Gem Bet Synced and Ready!")
+        print("✅ Gem Bet is Synced and Ready!")
 
 bot = GemBetBot()
 
 def get_embed(title, desc, color=0x3471eb):
     embed = discord.Embed(title=title, description=desc, color=color)
-    embed.set_footer(text="GemBet💎 | Virtual Games", icon_url=Config["Bot Icon"])
+    embed.set_footer(text="GemBet💎 | Virtual Games")
     return embed
 
 @bot.command()
 async def sync(ctx):
     await bot.tree.sync(guild=ctx.guild)
-    await ctx.send("🚀 **Commands Synced! Restart Discord (Ctrl+R).**")
+    await ctx.send("🚀 **Commands Synced! Restart Discord (Ctrl+R) and use `/`**")
 
-# --- PUBLIC COMMANDS ---
+# --- ECONOMY ---
 @bot.tree.command(name="balance", description="Check your gems")
 async def balance(interaction: discord.Interaction, user: discord.Member = None):
     uid = str((user or interaction.user).id)
-    register_user(uid)
-    await interaction.response.send_message(embed=get_embed("💰 Balance", f"{user or interaction.user} has **{add_suffix(get_gems(uid))}** gems.", 0x00ff00))
+    await interaction.response.send_message(embed=get_embed("💰 Balance", f"{user or interaction.user} has **{add_suffix(get_bal(uid))}** gems.", 0x00ff00))
 
 @bot.tree.command(name="tip", description="Tip a user")
 async def tip(interaction: discord.Interaction, member: discord.Member, amount: str):
     uid = str(interaction.user.id)
     amt = suffix_to_int(amount)
-    if get_gems(uid) < amt: return await interaction.response.send_message("❌ Insufficient gems!", ephemeral=True)
-    subtract_gems(uid, amt)
-    add_gems(str(member.id), amt)
+    if get_bal(uid) < amt: return await interaction.response.send_message("❌ Not enough gems!", ephemeral=True)
+    update_bal(uid, -amt)
+    update_bal(str(member.id), amt)
     await interaction.response.send_message(embed=get_embed("💸 Tip Sent", f"{interaction.user.mention} tipped {member.mention} **{add_suffix(amt)}** gems!", 0xf1c40f))
 
-# --- INTERACTIVE GAMES ---
+# --- GAMES ---
 
-@bot.tree.command(name="colordice", description="Bet on a color!")
-@app_commands.choices(color=[app_commands.Choice(name="🔴 Red", value="🔴"), app_commands.Choice(name="🔵 Blue", value="🔵"), app_commands.Choice(name="🟢 Green", value="🟢")])
-async def colordice(interaction: discord.Interaction, bet: str, color: str):
+@bot.tree.command(name="dice", description="Bet on high (4-6) or low (1-3)")
+@app_commands.choices(choice=[app_commands.Choice(name="High (4-6)", value="high"), app_commands.Choice(name="Low (1-3)", value="low")])
+async def dice(interaction: discord.Interaction, bet: str, choice: str):
     uid = str(interaction.user.id)
     can, msg = await can_play(uid)
-    if not can: return await interaction.response.send_message(msg, ephemeral=True)
+    if not can: return await interaction.response.send_//message(msg, ephemeral=True)
     
     amt = suffix_to_int(bet)
-    if get_gems(uid) < amt: return await interaction.response.send_message("❌ Insufficient gems!", ephemeral=True)
+    if get_bal(uid) < amt: return await interaction.response.send_message("❌ Not enough gems!", ephemeral=True)
 
     active_games[uid] = True
-    subtract_gems(uid, amt)
-    await interaction.response.send_message(embed=get_embed("🎲 Color Dice", f"Betting {add_suffix(amt)} on {color}... Spinning! 🎰"))
+    update_bal(uid, -amt)
+    await interaction.response.send_message(embed=get_embed("🎲 Dice Roll", f"Betting {add_suffix(amt)} on {choice}... Spinning! 🎰"))
     
-    for _ in range(4):
+    for _ in range(3):
         await asyncio.sleep(0.5)
-        await interaction.edit_original_response(embed=get_embed("🎲 Color Dice", f"Spinning... {random.choice(['🔴', '🔵', '🟢'])}"))
+        await interaction.edit_original_response(embed=get_embed("🎲 Dice Roll", f"Spinning... {random.randint(1,6)}"))
     
-    final = random.choice(["🔴", "🔵", "🟢"])
-    if final == color:
-        add_gems(uid, amt * 2)
-        res, col = f"🎉 **WIN!** It was {final}!\nWon **{add_suffix(amt*2)}** gems!", 0x00ff00
+    roll = random.randint(1, 6)
+    win = (choice == 'high' and roll >= 4) or (choice == 'low' and roll <= 3)
+    
+    if win:
+        update_bal(uid, amt * 2)
+        res, col = f"🎉 **WIN!** Rolled {roll}. Won **{add_suffix(amt*2)}** gems!", 0x00ff00
     else:
-        res, col = f"💀 **LOSS!** It was {final}.\nLost **{add_suffix(amt)}** gems!", 0xff0000
+        res, col = f"💀 **LOSS!** Rolled {roll}. Lost **{add_suffix(amt)}** gems!", 0xff0000
     
-    await interaction.edit_original_response(embed=get_embed("🎲 Color Dice", f"{res}\nBalance: **{add_suffix(get_gems(uid))}**", col))
-    del active_games[uid]
-    game_cooldowns[uid] = time.time()
-
-@bot.tree.command(name="roulette", description="Bet on 0-36")
-async def roulette(interaction: discord.Interaction, bet: str, number: int):
-    uid = str(interaction.user.id)
-    can, msg = await can_play(uid)
-    if not can: return await interaction.response.send_message(msg, ephemeral=True)
-    
-    amt = suffix_to_int(bet)
-    if get_gems(uid) < amt: return await interaction.response.send_message("❌ Insufficient gems!", ephemeral=True)
-
-    active_games[uid] = True
-    subtract_gems(uid, amt)
-    await interaction.response.send_message(embed=get_embed("🎡 Roulette", f"Betting {add_suffix(amt)} on {number}... Spinning! 🎡"))
-    
-    for _ in range(4):
-        await asyncio.sleep(0.5)
-        await interaction.edit_original_response(embed=get_embed("🎡 Roulette", f"Spinning... {random.randint(0,36)}"))
-    
-    final = random.randint(0, 36)
-    if final == number:
-        add_gems(uid, amt * 35)
-        res, col = f"🎊 **JACKPOT!** The number was {final}!\nWon **{add_suffix(amt*35)}** gems!", 0x00ff00
-    else:
-        res, col = f"💀 **LOSS!** The number was {final}.\nLost **{add_suffix(amt)}** gems!", 0xff0000
-    
-    await interaction.edit_original_response(embed=get_embed("🎡 Roulette", f"{res}\nBalance: **{add_suffix(get_gems(uid))}**", col))
+    await interaction.edit_original_response(embed=get_embed("🎲 Dice Result", f"{res}\nBalance: **{add_suffix(get_bal(uid))}**", col))
     del active_games[uid]
     game_cooldowns[uid] = time.time()
 
 @bot.tree.command(name="blackjack", description="Play 21!")
 async def blackjack(interaction: discord.Interaction, bet: str):
     uid = str(interaction.user.id)
-    can, msg = await can_//play(uid) # Fixed logic here
+    can, msg = await can_play(uid)
     if not can: return await interaction.response.send_message(msg, ephemeral=True)
     
     amt = suffix_to_int(bet)
-    if get_gems(uid) < amt: return await interaction.response.send_message("❌ Insufficient gems!", ephemeral=True)
+    if get_bal(uid) < amt: return await interaction.response.send_message("❌ Not enough gems!", ephemeral=True)
     
     active_games[uid] = True
-    subtract_gems(uid, amt)
+    update_bal(uid, -amt)
     
-    player = [random.randint(2, 11), random.randint(2, 11)]
-    dealer = [random.randint(2, 11), random.randint(2, 11)]
+    p = [random.randint(2, 11), random.randint(2, 11)]
+    d = [random.randint(2, 11), random.randint(2, 11)]
 
     class BJView(discord.ui.View):
         def __init__(self, user, bet, p, d):
@@ -230,37 +181,37 @@ async def blackjack(interaction: discord.Interaction, bet: str):
             while sum(self.d) < 17: self.d.append(random.randint(2, 11))
             p_sum, d_sum = sum(self.p), sum(self.d)
             if d_sum > 21 or p_sum > d_sum:
-                add_gems(str(self.user), self.bet * 2)
+                update_bal(str(self.user), self.bet * 2)
                 res = "🎉 **WIN!**"
             elif p_sum < d_sum:
                 res = "💀 **LOSS!**"
             else:
-                add_gems(str(self.user), self.bet)
+                update_bal(str(self.user), self.bet)
                 res = "🤝 **TIE!**"
             await inter.response.edit_message(content=f"{res}\nPlayer: {p_sum} | Dealer: {d_sum}", embed=None, view=None)
             active_games.pop(str(self.user), None)
             game_cooldowns[str(self.user)] = time.time()
 
-    await interaction.response.send_message(f"🃏 **Blackjack!** Your hand: `{player}` (Total: {sum(player)})\nDealer shows: `{dealer[0]}`", view=BJView(interaction.user.id, amt, player, dealer))
+    await interaction.response.send_message(f"🃏 **Blackjack!** Your hand: `{p}` (Total: {sum(p)})\nDealer shows: `{d[0]}`", view=BJView(interaction.user.id, amt, p, d))
 
-# --- MOD ONLY COMMANDS ---
+# --- MOD COMMANDS ---
 @bot.tree.command(name="add", description="[MOD] Add gems")
 async def add(interaction: discord.Interaction, member: discord.Member, amount: str):
     if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ No permission!", ephemeral=True)
     amt = suffix_to_int(amount)
-    add_gems(str(member.id), amt)
+    update_bal(str(member.id), amt)
     await interaction.response.send_message(embed=get_embed("➕ Added", f"Added **{add_suffix(amt)}** to {member.mention}", 0x00ff00))
 
 @bot.tree.command(name="remove", description="[MOD] Remove gems")
 async def remove(interaction: discord.Interaction, member: discord.Member, amount: str):
     if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ No permission!", ephemeral=True)
     amt = suffix_to_int(amount)
-    subtract_gems(str(member.id), amt)
+    update_bal(str(member.id), -amt)
     await interaction.response.send_message(embed=get_embed("➖ Removed", f"Removed **{add_suffix(amt)}** from {member.mention}", 0xff0000))
 
 @bot.event
 async def on_ready():
+    init_db()
     print(f'👑 Gem Bet is ONLINE as {bot.user}')
 
 bot.run(TOKEN)
-
