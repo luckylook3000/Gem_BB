@@ -1,4 +1,23 @@
 import os
+import sys
+import subprocess
+
+# ==========================================
+# 🚨 SELF-INSTALLER (Saves you from Build Errors)
+# ==========================================
+def install_dependencies():
+    try:
+        import discord
+        import dotenv
+    except ImportError:
+        print("📦 Installing missing libraries... please wait...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "discord.py", "python-dotenv"])
+        print("✅ Libraries installed! Restarting bot...")
+        os.execv(sys.executable, ['python'] + sys.argv)
+
+install_dependencies()
+
+# Now we import the rest
 import discord
 import random
 import asyncio
@@ -7,14 +26,21 @@ import time
 from discord import app_commands, Interaction, Embed
 from discord.ext import commands
 from discord.ui import Button, View
+from dotenv import load_dotenv
 
 # ==========================================
-# 1. TOKEN & SECRETS (Pulls directly from Replit Lock Icon 🔒)
+# 1. CONFIG & SECRETS
 # ==========================================
-TOKEN = os.getenv("DISCORDBOTTOKEN") 
+load_dotenv()
+# Try both common secret names just in case
+TOKEN = os.getenv("DISCORDBOTTOKEN") or os.getenv("TOKEN")
+
+if not TOKEN:
+    print("❌ ERROR: No Token found in Secrets! Please add DISCORDBOTTOKEN to your lock icon 🔒")
+    sys.exit()
 
 # ==========================================
-# 2. AUTO-DATABASE (Creates files if missing)
+# 2. DATABASE ENGINE (Auto-Creates everything)
 # ==========================================
 DATA_FILE = "data.json"
 
@@ -59,7 +85,7 @@ def suffix_to_int(s):
     return int(s)
 
 # ==========================================
-# 3. GAME LOCK & COOLDOWNS
+# 3. GAME LOCKS
 # ==========================================
 active_games = {} 
 game_cooldowns = {}
@@ -67,9 +93,9 @@ game_cooldowns = {}
 async def can_play(user_id):
     now = time.time()
     if user_id in active_games:
-        return False, "You already have a game in progress! Finish it first. ⏳"
-    if user_id in game_cooldowns and (now - game_co cooldowns[user_id]) < 1.0:
-        return False, "Slow down! 1 second cooldown between games. ⏱️"
+        return False, "You already have a game in progress! ⏳"
+    if user_id in game_cooldowns and (now - game_cooldowns[user_id]) < 1.0:
+        return False, "Slow down! 1 second cooldown. ⏱️"
     return True, None
 
 # ==========================================
@@ -84,7 +110,7 @@ class GemBetBot(commands.Bot):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print("✅ Gem Bet is Synced and Ready!")
+        print("✅ Slash commands synced!")
 
 bot = GemBetBot()
 
@@ -96,43 +122,28 @@ def get_embed(title, desc, color=0x3471eb):
 @bot.command()
 async def sync(ctx):
     await bot.tree.sync(guild=ctx.guild)
-    await ctx.send("🚀 **Commands Synced! Restart Discord (Ctrl+R) and use `/`**")
+    await ctx.send("🚀 **Synced! Restart Discord (Ctrl+R) and type `/`**")
 
-# --- ECONOMY ---
-@bot.tree.command(name="balance", description="Check your gems")
+@bot.tree.command(name="balance", description="Check gems")
 async def balance(interaction: discord.Interaction, user: discord.Member = None):
     uid = str((user or interaction.user).id)
     await interaction.response.send_message(embed=get_embed("💰 Balance", f"{user or interaction.user} has **{add_suffix(get_bal(uid))}** gems.", 0x00ff00))
 
-@bot.tree.command(name="tip", description="Tip a user")
-async def tip(interaction: discord.Interaction, member: discord.Member, amount: str):
-    uid = str(interaction.user.id)
-    amt = suffix_to_int(amount)
-    if get_bal(uid) < amt: return await interaction.response.send_message("❌ Not enough gems!", ephemeral=True)
-    update_bal(uid, -amt)
-    update_bal(str(member.id), amt)
-    await interaction.response.send_message(embed=get_embed("💸 Tip Sent", f"{interaction.user.mention} tipped {member.mention} **{add_suffix(amt)}** gems!", 0xf1c40f))
-
-# --- GAMES ---
-
-@bot.tree.command(name="dice", description="Bet on high (4-6) or low (1-3)")
-@app_commands.choices(choice=[app_commands.Choice(name="High (4-6)", value="high"), app_commands.Choice(name="Low (1-3)", value="low")])
+@bot.tree.command(name="dice", description="Bet on high or low")
+@app_commands.choices(choice=[app_commands.Choice(name="High", value="high"), app_commands.Choice(name="Low", value="low")])
 async def dice(interaction: discord.Interaction, bet: str, choice: str):
     uid = str(interaction.user.id)
     can, msg = await can_play(uid)
-    if not can: return await interaction.response.send_//message(msg, ephemeral=True)
+    if not can: return await interaction.response.send_message(msg, ephemeral=True)
     
     amt = suffix_to_int(bet)
     if get_bal(uid) < amt: return await interaction.response.send_message("❌ Not enough gems!", ephemeral=True)
 
     active_games[uid] = True
     update_bal(uid, -amt)
-    await interaction.response.send_message(embed=get_embed("🎲 Dice Roll", f"Betting {add_suffix(amt)} on {choice}... Spinning! 🎰"))
+    await interaction.response.send_message(embed=get_embed("🎲 Dice", f"Spinning... 🎰"))
     
-    for _ in range(3):
-        await asyncio.sleep(0.5)
-        await interaction.edit_original_response(embed=get_embed("🎲 Dice Roll", f"Spinning... {random.randint(1,6)}"))
-    
+    await asyncio.sleep(1)
     roll = random.randint(1, 6)
     win = (choice == 'high' and roll >= 4) or (choice == 'low' and roll <= 3)
     
@@ -142,72 +153,9 @@ async def dice(interaction: discord.Interaction, bet: str, choice: str):
     else:
         res, col = f"💀 **LOSS!** Rolled {roll}. Lost **{add_suffix(amt)}** gems!", 0xff0000
     
-    await interaction.edit_original_response(embed=get_embed("🎲 Dice Result", f"{res}\nBalance: **{add_suffix(get_bal(uid))}**", col))
+    await interaction.edit_original_response(embed=get_embed("🎲 Result", f"{res}\nBalance: **{add_suffix(get_bal(uid))}**", col))
     del active_games[uid]
     game_cooldowns[uid] = time.time()
-
-@bot.tree.command(name="blackjack", description="Play 21!")
-async def blackjack(interaction: discord.Interaction, bet: str):
-    uid = str(interaction.user.id)
-    can, msg = await can_play(uid)
-    if not can: return await interaction.response.send_message(msg, ephemeral=True)
-    
-    amt = suffix_to_int(bet)
-    if get_bal(uid) < amt: return await interaction.response.send_message("❌ Not enough gems!", ephemeral=True)
-    
-    active_games[uid] = True
-    update_bal(uid, -amt)
-    
-    p = [random.randint(2, 11), random.randint(2, 11)]
-    d = [random.randint(2, 11), random.randint(2, 11)]
-
-    class BJView(discord.ui.View):
-        def __init__(self, user, bet, p, d):
-            super().__init__(timeout=60)
-            self.user, self.bet, self.p, self.d = user, bet, p, d
-        @discord.ui.button(label="Hit", style=discord.ButtonStyle.green)
-        async def hit(self, inter, btn):
-            if inter.user.id != self.user: return await inter.response.defer()
-            self.p.append(random.randint(2, 11))
-            if sum(self.p) > 21:
-                await inter.response.edit_message(content=f"💥 **BUST!** Total {sum(self.p)}. Lost {add_suffix(self.bet)} gems.", embed=None, view=None)
-                active_games.pop(str(self.user), None)
-                game_cooldowns[str(self.user)] = time.time()
-            else:
-                await inter.response.edit_message(content=f"🃏 Hand: `{self.p}` (Total: {sum(self.p)})", view=self)
-        @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
-        async def stand(self, inter, btn):
-            if inter.user.id != self.user: return await inter.response.defer()
-            while sum(self.d) < 17: self.d.append(random.randint(2, 11))
-            p_sum, d_sum = sum(self.p), sum(self.d)
-            if d_sum > 21 or p_sum > d_sum:
-                update_bal(str(self.user), self.bet * 2)
-                res = "🎉 **WIN!**"
-            elif p_sum < d_sum:
-                res = "💀 **LOSS!**"
-            else:
-                update_bal(str(self.user), self.bet)
-                res = "🤝 **TIE!**"
-            await inter.response.edit_message(content=f"{res}\nPlayer: {p_sum} | Dealer: {d_sum}", embed=None, view=None)
-            active_games.pop(str(self.user), None)
-            game_cooldowns[str(self.user)] = time.time()
-
-    await interaction.response.send_message(f"🃏 **Blackjack!** Your hand: `{p}` (Total: {sum(p)})\nDealer shows: `{d[0]}`", view=BJView(interaction.user.id, amt, p, d))
-
-# --- MOD COMMANDS ---
-@bot.tree.command(name="add", description="[MOD] Add gems")
-async def add(interaction: discord.Interaction, member: discord.Member, amount: str):
-    if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ No permission!", ephemeral=True)
-    amt = suffix_to_int(amount)
-    update_bal(str(member.id), amt)
-    await interaction.response.send_message(embed=get_embed("➕ Added", f"Added **{add_suffix(amt)}** to {member.mention}", 0x00ff00))
-
-@bot.tree.command(name="remove", description="[MOD] Remove gems")
-async def remove(interaction: discord.Interaction, member: discord.Member, amount: str):
-    if not interaction.user.guild_permissions.administrator: return await interaction.response.send_message("❌ No permission!", ephemeral=True)
-    amt = suffix_to_int(amount)
-    update_bal(str(member.id), -amt)
-    await interaction.response.send_message(embed=get_embed("➖ Removed", f"Removed **{add_suffix(amt)}** from {member.mention}", 0xff0000))
 
 @bot.event
 async def on_ready():
@@ -215,3 +163,4 @@ async def on_ready():
     print(f'👑 Gem Bet is ONLINE as {bot.user}')
 
 bot.run(TOKEN)
+
